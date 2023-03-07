@@ -79,6 +79,22 @@ app.post('/login', async (req, res, next) => {
   }
 })
 
+//TODO - Account for expired token in setUser
+//TODO - Send token with registration
+//TODO - Include id with token to make it easier to find
+//TODO - Account for lower case
+//TODO - Server-side exception handling?
+
+//TODO - Create delete account route
+//TODO - Create edit account route
+//TODO - Create logout route?
+
+//TODO - Create journal entries model in db
+//TODO - Create relationships between models
+//TODO - Create CRUD routes for journal entries using auth. 
+
+
+
 /* Exports */
 
 module.exports = app;
