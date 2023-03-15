@@ -1,17 +1,19 @@
 const express = require('express');
 const app = express();
-const cors = require('cors')
-const { User } = require('./db');
+const cors = require('cors');
+const { getUserByEmail, createUser, destroyUser, getUserById, updateUser } = require('./server/functions/db')
 const { hashPw, comparePw } = require('./server/functions/password');
 const { generateToken } = require('./server/functions/jwt');
-const { errorHandling, setUser } = require('./server/middleware/index');
+const { errorHandling, setUser, lowerCaseFields } = require('./server/middleware/index');
+const { registerValidationRules, loginValidationRules, updateValidationRules, validate } = require('./server/functions/validation');
 
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({extended:true}));
 app.use(cors());
 app.use(setUser);
-app.use(errorHandling)
+app.use(errorHandling);
+app.use(lowerCaseFields);
 
 //GET
 app.get('/', async (req, res, next) => {
@@ -26,74 +28,114 @@ app.get('/', async (req, res, next) => {
   }
 });
 
-app.get('/user', async (req, res, next) => {
-  try{
-    const user = req.user 
-    if (!user) {
-      res.send('There is nobody logged in')
-      return;
-    }
-    res.send(user); 
-  }catch(error){
-    next(error);
-  }
-})
-
 //POST
-app.post('/register', async (req, res, next) => {
+app.post('/user/register', registerValidationRules(), validate, async (req, res, next) => {
   try{
     const {username, email, password} = req.body;
-    const foundUser = await User.findOne({where: {email}});
+    const foundUser = await getUserByEmail(email);
 
     if (foundUser){
       res.send(`There is already an account registered to ${email}. If this is your account, please go to /login and  enter your password to login.`)
       return
     }
     const hashedPw = await hashPw(password);
-    const user = await User.create({username, email, password: hashedPw})
-    res.send(`${req.body.username} has registered successfully!`) 
-    //TODO create and send token
+    const user = await createUser(username, email, hashedPw);
+    const token = generateToken(user.id, email, username, user.is_admin);
+    res.send({message: `${req.body.username} has registered successfully!`, token}); 
   } catch(error){
     next(error)
   }
 })
 
-app.post('/login', async (req, res, next) => {
+app.post('/user/login', loginValidationRules(), validate, async (req, res, next) => {
   try{
-    const {email, password} = req.body;
-    const foundUser = await User.findOne({where: {email}});
-    if (!foundUser){
-      res.send(`We are unable to find an account registered to ${email}. Please go to /register to create a new account.`)
-      return
-    }
-    const isMatch = await comparePw(password, foundUser.password);   
-
-    if (isMatch) {
-      const token = generateToken(email, foundUser.username);
-      res.send({message: "User successfully created", token});
+    if(req.user) {
+      const {id, email, username, is_admin} = req.user
+      const token = generateToken(id, email, username, is_admin); // Should refresh token instead of issuing a new one here
+      res.send({message: `Hello ${username}! You are now logged in!`, token});
       return;
+    } else {
+      const {email, password} = req.body;
+      foundUser = await getUserByEmail(email);
+      if (!foundUser){
+        res.send(`We are unable to find an existing account registered to ${email}. Please go to /register to create a new account.`)
+        return;
+      }
+      const isMatch = await comparePw(password, foundUser.password);   
+      if (isMatch) {
+        const token = generateToken(foundUser.id, email, foundUser.username, foundUser.is_admin);
+        res.send({message: `${foundUser.username} is now logged in!`, token});
+        return;
+      }
+      res.send(`Sorry, the password you have provided is incorrect for the account registered to ${email}. Please enter the correct password to login.`);
     }
-    res.send(`Sorry, the password you have provided is incorrect for ${email}. Please enter the correct password to login.`);
   } catch(error) {
     next(error)
   }
 })
 
-//TODO - Account for expired token in setUser
-//TODO - Send token with registration
-//TODO - Include id with token to make it easier to find
-//TODO - Account for lower case
-//TODO - Server-side exception handling?
+//DELETE
+app.delete('/user/delete', async (req, res, next) => {
+  try{
+    if(req.user) {
+      const user = await getUserById(req.user.id);
+      if (user) {
+        const {id, email} = req.user;
+        await destroyUser(id);
+        res.send(`Account registered to ${email} has been successfully deleted.`);
+      } else {
+        res.send(`We are unable to find an existing account registered to ${req.user.email}. Please go to /register to create a new account.`)
+      }
+    } else { 
+      res.send(`Please log in to delete your account.`)
+    }
+  } catch(error) {
+    next(error)
+  }
+})
 
-//TODO - Create delete account route
-//TODO - Create edit account route
-//TODO - Create logout route?
+//PUT
+app.put('/user/update', updateValidationRules(), validate, async (req, res, next) => {
+  try{
+    if(req.user) {
+      const user = await getUserById(req.user.id);
+      if (user) {
+        let {password, username} = user;
+        let newUserDetails = {password, username}
+        if (req.body.password.trim() !== "") {newUserDetails.password = await hashPw(req.body.password)};
+        if (req.body.username.trim() !== "") {newUserDetails.username = req.body.username};
+        const updatedUser = await updateUser(user, newUserDetails);
+        const token = generateToken(updatedUser.id, updatedUser.email, updatedUser.username, updatedUser.is_admin);
+        res.send({message: `Account details have been updated for ${updatedUser.email}`, token})
+      } else { 
+        res.send(`We are unable to find an existing account registered to ${req.user.email}. Please go to /register to create a new account.`)
+      }
+    } else {
+      res.send(`Please log in first to your account.`)
+    }
+  } catch(error) {
+    next(error)
+  }
+})
 
-//TODO - Create journal entries model in db
-//TODO - Create relationships between models
-//TODO - Create CRUD routes for journal entries using auth. 
+//TODO - Router
 
 
+/* 
+
+Intro
+File structure
+app vs learning 
+
+issues: 
+
+Real world testing (secrets, browser handling tokens)
+Secret types (port and salt count number)
+Validity of input data (model fields, email as user [need to verify in real world], case handling as middleware, white space [validator])
+Token Expiry (when to re-issue, stateless, no db query, no way to log out) New token instead of refresh
+TODO - encrypt emails
+
+*/
 
 /* Exports */
 

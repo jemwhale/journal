@@ -13,10 +13,8 @@ const setUser = (req,res,next) => {
       const [, token] = auth.split(" ")
       const user = verifyToken(token);
       req.user = user; 
-      //TODO Account for expired token
       next();
     } catch (error) {
-      console.log(error);
       next(error);
     }
   }

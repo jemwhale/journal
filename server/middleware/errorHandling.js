@@ -1,5 +1,3 @@
-
-
 const errorHandling = (error, req, res, next) => {
     console.error('SERVER ERROR: ', error);
     if(res.statusCode < 400) res.status(500);
